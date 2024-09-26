@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -13,8 +14,9 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QFileDialog,
     QMessageBox,
+    QInputDialog,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 import win32com.client
 
 
@@ -22,6 +24,11 @@ class TimeTableApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("授業フォルダ、ショートカット生成")
+        self.timetables = {}
+        self.current_timetable = "default"
+        self.auto_save_timer = QTimer(self)
+        self.auto_save_timer.timeout.connect(self.auto_save)
+        self.auto_save_timer.start(60000)
 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -56,16 +63,29 @@ class TimeTableApp(QMainWindow):
         self.timetable.setHorizontalHeaderLabels(["月", "火", "水", "木", "金"])
         self.timetable.setVerticalHeaderLabels(["1", "2", "3", "4", "5"])
         self.timetable.setMinimumHeight(300)
+        self.timetable.itemChanged.connect(self.on_timetable_changed)
         main_layout.addWidget(self.timetable)
 
+        button_layout = QHBoxLayout()
         generate_button = QPushButton("フォルダとショートカットを生成")
         generate_button.clicked.connect(self.generate_folders_and_shortcuts)
-        main_layout.addWidget(generate_button)
+        save_button = QPushButton("名前をつけて保存")
+        save_button.clicked.connect(self.save_timetable)
+        load_button = QPushButton("読み込み")
+        load_button.clicked.connect(self.load_timetable)
+        button_layout.addWidget(generate_button)
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(load_button)
+        main_layout.addLayout(button_layout)
+
+        self.load_timetables()
+        self.auto_load_last_timetable()
 
     def select_folder(self, line_edit, caption):
         folder = QFileDialog.getExistingDirectory(self, caption)
         if folder:
             line_edit.setText(folder)
+            self.auto_save()
 
     def generate_folders_and_shortcuts(self):
         summary_folder = self.summary_folder.text()
@@ -107,6 +127,90 @@ class TimeTableApp(QMainWindow):
         QMessageBox.information(
             self, "完了", "フォルダとショートカットの生成が完了しました。"
         )
+
+    def save_timetable(self):
+        name, ok = QInputDialog.getText(
+            self, "時間割の保存", "時間割の名前を入力してください:"
+        )
+        if ok and name:
+            self.current_timetable = name
+            self.auto_save()
+            QMessageBox.information(
+                self, "保存完了", f"時間割 '{name}' を保存しました。"
+            )
+
+    def load_timetable(self):
+        names = list(self.timetables.keys())
+        if not names:
+            QMessageBox.warning(self, "エラー", "保存された時間割がありません。")
+            return
+        name, ok = QInputDialog.getItem(
+            self, "時間割の読み込み", "時間割を選択してください:", names, 0, False
+        )
+        if ok and name:
+            self.load_timetable_by_name(name)
+
+    def load_timetable_by_name(self, name):
+        if name in self.timetables:
+            timetable_data = self.timetables[name]
+            self.summary_folder.setText(timetable_data["summary_folder"])
+            self.shortcut_folder.setText(timetable_data["shortcut_folder"])
+            self.timetable.blockSignals(True)
+            self.timetable.clearContents()
+            for class_data in timetable_data["classes"]:
+                self.timetable.setItem(
+                    class_data["row"],
+                    class_data["col"],
+                    QTableWidgetItem(class_data["name"]),
+                )
+            self.timetable.blockSignals(False)
+            self.current_timetable = name
+        else:
+            QMessageBox.warning(self, "エラー", f"時間割 '{name}' が見つかりません。")
+
+    def save_timetables(self):
+        data_to_save = {
+            "timetables": self.timetables,
+            "last_used": self.current_timetable,
+        }
+        with open("timetables.json", "w", encoding="utf-8") as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+
+    def load_timetables(self):
+        try:
+            with open("timetables.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.timetables = data.get("timetables", {})
+                self.current_timetable = data.get("last_used", "default")
+        except FileNotFoundError:
+            self.timetables = {}
+            self.current_timetable = "default"
+
+    def on_timetable_changed(self, item):
+        self.auto_save()
+
+    def auto_save(self):
+        timetable_data = {
+            "summary_folder": self.summary_folder.text(),
+            "shortcut_folder": self.shortcut_folder.text(),
+            "classes": [],
+        }
+        for row in range(5):
+            for col in range(5):
+                item = self.timetable.item(row, col)
+                if item and item.text():
+                    timetable_data["classes"].append(
+                        {"name": item.text(), "row": row, "col": col}
+                    )
+        self.timetables[self.current_timetable] = timetable_data
+        self.save_timetables()
+
+    def auto_load_last_timetable(self):
+        if self.current_timetable in self.timetables:
+            self.load_timetable_by_name(self.current_timetable)
+        elif self.timetables:
+            last_timetable = list(self.timetables.keys())[-1]
+            self.load_timetable_by_name(last_timetable)
 
 
 if __name__ == "__main__":
