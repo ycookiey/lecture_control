@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import shutil
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -73,9 +74,12 @@ class TimeTableApp(QMainWindow):
         save_button.clicked.connect(self.save_timetable)
         load_button = QPushButton("読み込み")
         load_button.clicked.connect(self.load_timetable)
+        clear_shortcut_button = QPushButton("ショートカットフォルダをクリア")
+        clear_shortcut_button.clicked.connect(self.clear_shortcut_folder)
         button_layout.addWidget(generate_button)
         button_layout.addWidget(save_button)
         button_layout.addWidget(load_button)
+        button_layout.addWidget(clear_shortcut_button)
         main_layout.addLayout(button_layout)
 
         self.load_timetables()
@@ -211,6 +215,41 @@ class TimeTableApp(QMainWindow):
         elif self.timetables:
             last_timetable = list(self.timetables.keys())[-1]
             self.load_timetable_by_name(last_timetable)
+
+    def clear_shortcut_folder(self):
+        shortcut_folder = self.shortcut_folder.text()
+        if not shortcut_folder:
+            QMessageBox.warning(
+                self, "エラー", "ショートカットフォルダが指定されていません。"
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            "ショートカットフォルダ内のすべてのファイルとフォルダを削除しますか？\n"
+            "この操作は元に戻せません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                for filename in os.listdir(shortcut_folder):
+                    file_path = os.path.join(shortcut_folder, filename)
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                QMessageBox.information(
+                    self, "完了", "ショートカットフォルダをクリアしました。"
+                )
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "エラー",
+                    f"ショートカットフォルダのクリア中にエラーが発生しました：{str(e)}",
+                )
 
 
 if __name__ == "__main__":
